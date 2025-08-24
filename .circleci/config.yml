@@ -1,0 +1,184 @@
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@4.1
+  node: circleci/node@5.1
+
+executors:
+  node:
+    docker:
+      - image: cimg/node:18.19
+    working_directory: /home/circleci/project
+
+jobs:
+  # Install dependencies and cache them
+  install-dependencies:
+    executor: node
+    steps:
+      - checkout
+      - node/install-packages:
+          cache-path: node_modules
+          override-ci-command: npm ci
+
+  # Build the React application
+  build-frontend:
+    executor: node
+    steps:
+      - checkout
+      - node/install-packages:
+          cache-path: node_modules
+          override-ci-command: npm ci
+      - run:
+          name: "Build React Application"
+          command: npm run build
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist/
+            - node_modules/
+
+  # Deploy to S3 using the deployment script
+  deploy-to-s3:
+    executor: aws
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - aws-cli/install
+      - aws-cli/configure
+      - run:
+          name: "Deploy Frontend Using Script"
+          command: |
+            # Use the deployment script instead of hardcoded commands
+            echo "Using deploy-frontend.sh script for deployment..."
+            
+            # Make script executable and run it
+            chmod +x ./scripts/deploy-frontend.sh
+            
+            # Run deployment script (deploy-only since build is already done)
+            ./scripts/deploy-frontend.sh --deploy-only
+            
+            echo "✅ Frontend deployment completed via script"
+
+  # CloudFront cache invalidation is now handled by the deployment script
+  # This job is kept for backward compatibility but simplified
+  invalidate-cloudfront:
+    executor: aws
+    steps:
+      - checkout
+      - run:
+          name: "CloudFront Invalidation Status"
+          command: |
+            echo "✅ CloudFront cache invalidation is now handled automatically by the deployment script"
+            echo "No additional invalidation needed - the script handles everything!"
+
+    # Test the deployed frontend
+  test-frontend:
+    executor: aws
+    steps:
+      - checkout
+      - aws-cli/install
+      - aws-cli/configure
+      - run:
+          name: "Test Frontend Using Script"
+          command: |
+            # Use the deployment script to get the frontend URL and test it
+            echo "Using deploy-frontend.sh script for testing..."
+            
+            # Make script executable
+            chmod +x ./scripts/deploy-frontend.sh
+            
+            # Run the script in test mode (it will get the URL and show it)
+            # We'll use a simple test since the script doesn't have a test-only mode
+            echo "Testing frontend accessibility..."
+            
+            # Get the frontend URL from infrastructure outputs
+            cd ../infrastructure-repo/terraform
+            
+            # Initialize Terraform to get outputs
+            terraform init -backend-config="bucket=incident-landing-page" \
+              -backend-config="key=incident-stakeholder-portal/terraform.tfstate" \
+              -backend-config="region=us-east-1"
+            
+            # Get CloudFront domain
+            CLOUDFRONT_DOMAIN=$(terraform output -raw frontend_cloudfront_distribution_domain)
+            FRONTEND_URL="https://$CLOUDFRONT_DOMAIN"
+            
+            echo "Frontend URL: $FRONTEND_URL"
+            
+            # Test that the page loads
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$FRONTEND_URL")
+            
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "✅ Frontend is accessible (HTTP $HTTP_STATUS)"
+            else
+              echo "❌ Frontend returned HTTP $HTTP_STATUS"
+              exit 1
+            fi
+            
+            # Test that the page contains expected content
+            if curl -s "$FRONTEND_URL" | grep -q "Incident Stakeholder Portal"; then
+              echo "✅ Frontend content is correct"
+            else
+              echo "❌ Frontend content is not as expected"
+              exit 1
+            fi
+            
+            echo "🎉 Frontend testing completed successfully!"
+
+workflows:
+  version: 2
+  
+  # Main workflow for frontend deployment
+  frontend-deployment:
+    jobs:
+      - install-dependencies:
+          filters:
+            branches:
+              only: main
+      
+      - build-frontend:
+          requires:
+            - install-dependencies
+          filters:
+            branches:
+              only: main
+      
+      - deploy-to-s3:
+          requires:
+            - build-frontend
+          filters:
+            branches:
+              only: main
+          context: aws-credentials
+      
+      - invalidate-cloudfront:
+          requires:
+            - deploy-to-s3
+          filters:
+            branches:
+              only: main
+          context: aws-credentials
+      
+      - test-frontend:
+          requires:
+            - invalidate-cloudfront
+          filters:
+            branches:
+              only: main
+          context: aws-credentials
+  
+  # Development workflow (build only)
+  development:
+    jobs:
+      - install-dependencies:
+          filters:
+            branches:
+              only: [develop, feature/*, hotfix/*]
+      
+      - build-frontend:
+          requires:
+            - install-dependencies
+          filters:
+            branches:
+              only: [develop, feature/*, hotfix/*] 

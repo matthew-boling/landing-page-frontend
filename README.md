@@ -226,34 +226,50 @@ npm run test:coverage
 
 ## 🚀 **Deployment**
 
-### **Build Process**
+### **Local Development**
 ```bash
-# Production build
-npm run build
+# Start development server
+npm run dev
 
-# The build creates a `dist/` directory with:
-# - Optimized HTML
-# - Minified CSS and JavaScript
-# - Static assets
-# - Service worker (if configured)
+# Build for production
+npm run build
 ```
 
-### **Deployment Options**
-- **Vercel**: Zero-config deployment
-- **Netlify**: Static site hosting
-- **AWS S3**: Cloud storage with CloudFront
-- **GitHub Pages**: Free hosting for open source
+### **Production Deployment**
 
-### **Environment Variables**
+#### **Option 1: Manual Deployment**
 ```bash
-# Development
-VITE_API_BASE_URL=http://localhost:3000
+# Deploy to S3 + CloudFront
+./scripts/deploy-frontend.sh
 
-# Staging
-VITE_API_BASE_URL=https://staging-api.example.com
+# Build only (no deployment)
+./scripts/deploy-frontend.sh --build-only
 
-# Production
-VITE_API_BASE_URL=https://api.example.com
+# Deploy only (requires existing build)
+./scripts/deploy-frontend.sh --deploy-only
+```
+
+#### **Option 2: CircleCI Pipeline (Recommended)**
+```bash
+# Push to main branch triggers automatic deployment
+git push origin main
+```
+
+### **Deployment Prerequisites**
+- ✅ AWS CLI configured with appropriate permissions
+- ✅ Infrastructure deployed via Terraform (creates S3 bucket and CloudFront)
+- ✅ Infrastructure repository in `../infrastructure-repo` directory
+
+### **Repository Structure**
+```
+parent-directory/
+├── frontend-repo/        (this repository)
+│   ├── src/              # React source code
+│   ├── scripts/          # Deployment scripts
+│   └── .circleci/        # Frontend CI/CD pipeline
+└── infrastructure-repo/   # AWS infrastructure configuration
+    ├── terraform/         # Terraform configurations
+    └── .circleci/         # Infrastructure CI/CD pipeline
 ```
 
 ## 🔒 **Security Considerations**
